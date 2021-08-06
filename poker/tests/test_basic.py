@@ -148,4 +148,5 @@ def add_player(client, holdem_2max_game, logged_in_user1):
 
 def test_add_player(client, holdem_2max_game, logged_in_user1):
     rv = add_player(client, holdem_2max_game, logged_in_user1)
+    print(rv.json)
     assert rv._status_code == 200
