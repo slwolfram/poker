@@ -1,11 +1,17 @@
-from flask import json
 import pytest
 from .config import test_user
 from poker import create_app
+from poker.model.poker_model import *
 import os
 import glob
 import datetime
 import dataset
+from poker.repo.poker_repo import *
+
+
+@pytest.fixture(scope='session', autouse=True)
+def db():
+    return dataset.connect('sqlite:///temp.db')
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -28,8 +34,14 @@ def register_user(client, username, password, email):
 
 @pytest.fixture
 def registered_user(client):
-    user_details = (test_user['USERNAME'], test_user['PASSWORD'],
-                    test_user['EMAIL'])
+    user_details = ('testuser', 'password', 'testuser@test.com')
+    rv = register_user(client, *user_details)
+    return rv.json
+
+
+@pytest.fixture
+def registered_user2(client):
+    user_details = ('testuser2', 'password2', 'testuser2@test.com')
     rv = register_user(client, *user_details)
     return rv.json
 
@@ -50,6 +62,12 @@ def logged_in_user1(client, registered_user):
     return rv.json
 
 
+@pytest.fixture
+def logged_in_user2(client, registered_user2):
+    rv = login_user(
+        client, registered_user2['username'], None, registered_user2['password'])
+    return rv.json
+
 def test_create_app(client):
     assert client is not None
 
@@ -58,7 +76,7 @@ def test_register_user(client):
     rv = register_user(client, test_user['USERNAME'], test_user['PASSWORD'],
                        test_user['EMAIL'])
     assert rv._status_code == 201
-    assert 'ident' in rv.json
+    assert 'user_id' in rv.json
 
 
 def test_login_user_with_username(client, registered_user):
@@ -124,9 +142,9 @@ def create_2max_holdem_game(client, auth_token):
 
 
 @pytest.fixture
-def holdem_2max_game(client, logged_in_user1):
+def holdem_2max_game(client, logged_in_user1) -> Game:
     rv = create_2max_holdem_game(client, logged_in_user1['auth_token'])
-    return rv.json
+    return Game(rv.json)
 
 
 def test_create_game(client, logged_in_user1):
@@ -135,10 +153,10 @@ def test_create_game(client, logged_in_user1):
     assert rv._status_code == 201
 
 
-def add_player(client, holdem_2max_game, logged_in_user1):
+def add_player(client, holdem_2max_game: Game, logged_in_user1):
     rv = client.post('api/poker/player/',
-                     json={'user_id': logged_in_user1['ident'],
-                           'game_id': holdem_2max_game['ident'],
+                     json={'user_id': logged_in_user1['user_id'],
+                           'game_id': holdem_2max_game.game_id,
                            'seat_num': 1,
                            'buyin': 20000
                            },
@@ -146,7 +164,23 @@ def add_player(client, holdem_2max_game, logged_in_user1):
     return rv
 
 
-def test_add_player(client, holdem_2max_game, logged_in_user1):
+def get_db():
+    return dataset.connect('sqlite:///temp.db')
+
+
+def test_add_player(client, holdem_2max_game: Game, logged_in_user1):
     rv = add_player(client, holdem_2max_game, logged_in_user1)
     print(rv.json)
+    assert len(get_players(get_db(), holdem_2max_game.game_id)) == 1
     assert rv._status_code == 200
+
+
+def test_start_game(client, holdem_2max_game: Game, logged_in_user1, logged_in_user2, db):
+    add_player(client, holdem_2max_game, logged_in_user1)
+    add_player(client, holdem_2max_game, logged_in_user2)
+    game = get_game(db, holdem_2max_game.game_id)
+    players = get_players(db, holdem_2max_game.game_id)
+    assert len(players) == 2
+    assert game.state_cd == 'PREFLOP'
+
+

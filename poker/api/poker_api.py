@@ -1,9 +1,10 @@
+from typing import List
 from flask_restx import Namespace, Resource
 import uuid
-import datetime
 from poker.db import get_db
+from poker.model.poker_model import *
 from poker.api.util import token_required
-
+from poker.repo.poker_repo import *
 
 api = Namespace('poker')
 
@@ -28,63 +29,58 @@ player_parser.add_argument('buyin',    type=int, required=True, location='json')
 GAME_TYPES = ['texas_holdem']
 
 
-def get_game(game_ident):
-    games = get_db()['games']
-    game = games.find_one(ident=game_ident)
-    return game
 
-
-def update_game(game):
-    games = get_db()['games']
-    games.update(game, ['ident'])
-
-
-def insert_game(game):
-    game['state_cd'] = 'STARTING'
-    get_db()['games'].insert(game)
-
-
-def add_player(player):
-    get_db()['players'].insert(player)
-
-
-def get_players(game_id):
-    players = get_db()['players']
-    return players.find(game_id=game_id)
-
-
-def update_players(players):
-    players_db = get_db()['players']
-    for p in players:
-        players_db.update(p, ['game_id', 'user_id'])
-        
-
-def assign_positions(players):
+def assign_positions(players: List[Player]):
     pos = 1
     for p in players:
-        if not p['sitting_out']:
-            p['position'] = pos
+        if not p.sitting_out:
+            p.position = pos
             pos += 1
 
 
-def post_blinds(game, players):
+def post_blinds(game: Game, players: List[Player]):
     for p in players:
-        if p['position'] == 1:
-            p['bet_amt'] = game['small_blind']
-            p['stack'] = game['small_blind']
-            p['is_active'] = True
-        elif p['position'] == 2:
-            p['bet_amt'] = game['big_blind']
-            p['stack'] = game['big_blind']
+        if p.position == 1:
+            p.bet_amt = game.small_blind
+            p.stack = game.small_blind
+            p.is_active = True
+        elif p.position == 2:
+            p.bet_amt = game.big_blind
+            p.stack = game.big_blind
             break
 
 
-def update_state(game, players):
-    if game['state_cd'] == 'STARTING' and len([p for p in players if not p['sitting_out']]) > 1:
-        game['state_cd'] = 'PREFLOP'
+def get_player_index_by_position(players: List[Player], position: int) -> int:
+    result = -1
+    for i, p in enumerate(players):
+        if p.position == position:
+            result = i
+    if result == -1:
+        raise Exception(f'No player has a position of {position}.')
+    return result
+
+
+def set_initial_active(players: List[Player]):
+    for p in players:
+        p.is_active = False
+    index = None
+    try:
+        index = get_player_index_by_position(players, 3)
+    except: pass
+    if index:
+        players[index].is_active = True
+    else:
+        players[get_player_index_by_position(players, 1)].is_active = True
+
+
+def update_state(db, game: Game, players: List[Player]):
+    if game.state_cd == 'STARTING' and len([p for p in players if not p.sitting_out]) > 1:
+        game.state_cd = 'PREFLOP'
         assign_positions(players)
         post_blinds(game, players)
-        update_players(players)
+        set_initial_active(players)
+        update_players(db, players)
+        update_game(db, vars(game))
 
 
 @api.route('/')
@@ -107,8 +103,8 @@ class GameList(Resource):
             return {'message': 'min_buyin must be greater than 0'}, 400
         if game['max_buyin'] < game['min_buyin']:
             return {'message': 'max_buyin can not be less than min_buyin'}, 400
-        game['ident'] = str(uuid.uuid4())
-        insert_game(game)
+        game['game_id'] = str(uuid.uuid4())
+        insert_game(get_db(), game)
         return game, 201
 
 
@@ -118,12 +114,14 @@ class PlayerList(Resource):
     @token_required
     def post(self):
         player = player_parser.parse_args()
-        game = get_game(player['game_id'])
-        if player['buyin'] < game['min_buyin']:
+        game = get_game(get_db(), player['game_id'])
+        if player['buyin'] < game.min_buyin:
             return {'message': 'buyin is less than minimum buyin.'}, 400
-        if player['buyin'] > game['max_buyin']:
+        if player['buyin'] > game.max_buyin:
             return {'message': 'buyin is greater than maximum buyin.'}, 400
-        add_player(player)
-        update_state(game, get_players(game['ident']))
+        player['stack'] = player['buyin']
+        player['sitting_out'] = False
+        db = get_db()
+        add_player(db, player)
+        update_state(db, game, get_players(db, game.game_id))
         return player, 200
-        

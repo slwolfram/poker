@@ -25,7 +25,7 @@ def get_user(username, email, password):
 def update_user(user):
 
     users = get_db()['users']
-    users.update(user, ['ident'])
+    users.update(user, ['user_id'])
 
 
 def insert_user(user):
@@ -34,7 +34,7 @@ def insert_user(user):
 
 def set_auth_token(user):
     user['auth_token'] = str(uuid.uuid4())
-    token = {'user_id': user['ident'],
+    token = {'user_id': user['user_id'],
              'auth_token': user['auth_token'],
              'token_expiry_dttm': datetime.datetime.now() + datetime.timedelta(hours=1)
              }
@@ -46,7 +46,7 @@ class RegisterUser(Resource):
     @api.expect(user_parser)
     def post(self):
         user = user_parser.parse_args()
-        user['ident'] = str(uuid.uuid4())
+        user['user_id'] = str(uuid.uuid4())
         user['role'] = 'USER'
         set_auth_token(user)
         insert_user(user)
