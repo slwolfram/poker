@@ -1,12 +1,15 @@
 import pytest
 from .config import test_user
 from poker import create_app
-from poker.model.poker_model import *
 import os
 import glob
 import datetime
 import dataset
 from poker.repo.poker_repo import *
+from poker.model.poker_model import *
+from flask_injector import FlaskInjector
+from injector import singleton
+import sqlite3
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -17,6 +20,13 @@ def db():
 @pytest.fixture(scope='session', autouse=True)
 def client():
     app = create_app({'ENV': 'UNITTEST', 'DBCONN': 'sqlite:///temp.db'})
+    def configure(binder):
+        binder.bind(
+            sqlite3.Connection,
+            to=dataset.connect('sqlite:///temp.db'),
+            scope=singleton,
+            )
+    FlaskInjector(app=app, modules=[configure])
     assert 'DBCONN' in app.config
     yield app.test_client()
     for f in glob.glob('temp.db*'):
@@ -144,7 +154,15 @@ def create_2max_holdem_game(client, auth_token):
 @pytest.fixture
 def holdem_2max_game(client, logged_in_user1) -> Game:
     rv = create_2max_holdem_game(client, logged_in_user1['auth_token'])
-    return Game(rv.json)
+    return Game(rv.json, [])
+
+
+@pytest.fixture
+def holdem_2max_game_preflop(client, db, holdem_2max_game, logged_in_user1, logged_in_user2):
+    add_player(client, holdem_2max_game, logged_in_user1, 1)
+    add_player(client, holdem_2max_game, logged_in_user2, 2)
+    return Game(get_game(db, holdem_2max_game.game_id),
+                get_players(db, holdem_2max_game.game_id))
 
 
 def test_create_game(client, logged_in_user1):
@@ -153,14 +171,14 @@ def test_create_game(client, logged_in_user1):
     assert rv._status_code == 201
 
 
-def add_player(client, holdem_2max_game: Game, logged_in_user1):
-    rv = client.post('api/poker/player/',
-                     json={'user_id': logged_in_user1['user_id'],
-                           'game_id': holdem_2max_game.game_id,
-                           'seat_num': 1,
+def add_player(client, holdem_2max_game: Game, logged_in_user, seat_num):
+    url = 'api/poker/{}/player/'.format(holdem_2max_game.game_id)
+    print(url)
+    rv = client.post(url,
+                     json={'seat_num': seat_num,
                            'buyin': 20000
                            },
-                     headers={'x-access_token': logged_in_user1['auth_token']})
+                     headers={'x-access_token': logged_in_user['auth_token']})
     return rv
 
 
@@ -169,18 +187,30 @@ def get_db():
 
 
 def test_add_player(client, holdem_2max_game: Game, logged_in_user1):
-    rv = add_player(client, holdem_2max_game, logged_in_user1)
+    rv = add_player(client, holdem_2max_game, logged_in_user1, 1)
     print(rv.json)
-    assert len(get_players(get_db(), holdem_2max_game.game_id)) == 1
     assert rv._status_code == 200
+    assert len(get_players(get_db(), holdem_2max_game.game_id)) == 1
 
 
-def test_start_game(client, holdem_2max_game: Game, logged_in_user1, logged_in_user2, db):
-    add_player(client, holdem_2max_game, logged_in_user1)
-    add_player(client, holdem_2max_game, logged_in_user2)
-    game = get_game(db, holdem_2max_game.game_id)
-    players = get_players(db, holdem_2max_game.game_id)
-    assert len(players) == 2
-    assert game.state_cd == 'PREFLOP'
+def test_start_game(holdem_2max_game_preflop: Game):
+    game = holdem_2max_game_preflop
+    bb_amt = game.big_blind
+    sb_amt = game.small_blind
+    bb = game.players.get_big_blind()
+    sb = game.players.get_small_blind()
+    assert len(game.players.players) == 2
+    assert sb.bet_amt == sb_amt
+    assert bb.bet_amt == bb_amt
+    assert sb.is_active == True
+    assert bb.is_active == False
+    assert game.state_cd == State.PREFLOP
 
 
+def test_action_when_not_turn(client, logged_in_user1, logged_in_user2, holdem_2max_game_preflop: Game):
+    game = holdem_2max_game_preflop
+    url = 'api/poker/{}/player/check_call'.format(holdem_2max_game.game_id)
+    client.get(url, headers={'x-access_token': logged_in_user1['auth_token']})
+
+def test_preflop_call(client, db, holdem_2max_game_preflop: Game):
+    pass

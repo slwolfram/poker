@@ -72,8 +72,5 @@ class LoginUser(Resource):
 class TestAuth(Resource):
     @api.doc(security='api_key')
     @token_required
-    def get(self):
+    def get(self, user_id):
         return 'Success', 200
-
-
-

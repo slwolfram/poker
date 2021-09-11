@@ -1,4 +1,4 @@
-from poker.model.poker_model import *
+from typing import List
 
 
 def get_players_table(db):
@@ -9,13 +9,12 @@ def get_games_table(db):
     return db.get_table('games')
 
 
-def get_games(db):
+def get_games(db) -> List[dict]:
     return list(get_games_table(db))
 
 
-def get_game(db, game_id):
-    return Game(get_games_table(db).find_one(game_id=game_id))
-
+def get_game(db, game_id) -> dict:
+    return get_games_table(db).find_one(game_id=game_id)
 
 def update_game(db, game: dict):
     games = db['games']
@@ -31,16 +30,12 @@ def add_player(db, player: dict):
     db['players'].insert(player)
 
 
-def get_players(db, game_id):
+def get_players(db, game_id) -> List[dict]:
     players = get_players_table(db)
-    return [Player(p) for p in
-            list(players.find(game_id=game_id))]
+    return list(players.find(game_id=game_id))
 
 
 def update_players(db, players):
-    if type(players[0]) == Player:
-        players = [vars(p) for p in players]
     players_db = db['players']
     for p in players:
         players_db.update(p, ['game_id', 'user_id'])
-

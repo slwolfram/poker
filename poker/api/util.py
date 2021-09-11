@@ -21,5 +21,6 @@ def token_required(f):
                 tk_table.update(res, ['auth_token'])
         else:
             return {'message': 'Missing auth token.'}, 401
+        kwargs['user_id'] = res['user_id']
         return f(*args, **kwargs)
     return inner
